@@ -9,5 +9,7 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
+      - key: ML_API_URL
+        value: https://anymo-ml.onrender.com
     healthCheckPath: /health
     autoDeploy: true 

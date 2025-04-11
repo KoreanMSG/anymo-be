@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -27,23 +30,30 @@ type Chat struct {
 }
 
 var db *sql.DB
+var mlAPIURL = "https://anymo-ml.onrender.com"
 
 func main() {
-	// Load environment variables only in development
+	// 로컬 개발 환경에서만 .env 파일 로드 (production이 아닌 경우)
 	if os.Getenv("ENVIRONMENT") != "production" {
 		if err := godotenv.Load(); err != nil {
-			log.Println("No .env file found")
+			log.Println("No .env file found, using environment variables")
 		}
 	}
 
-	// Database connection
+	// ML API URL 환경변수 확인
+	if envMLAPIURL := os.Getenv("ML_API_URL"); envMLAPIURL != "" {
+		mlAPIURL = envMLAPIURL
+	}
+	log.Printf("Using ML API URL: %s", mlAPIURL)
+
+	// 데이터베이스 연결 설정
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	log.Printf("Connecting to database with URL: %s", dbURL)
-
+	log.Println("Connecting to database...")
+	
 	var err error
 	db, err = sql.Open("postgres", dbURL)
 	if err != nil {
@@ -51,33 +61,33 @@ func main() {
 	}
 	defer db.Close()
 
-	// Test the connection
+	// 연결 테스트
 	err = db.Ping()
 	if err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 	log.Println("Successfully connected to the database")
 
-	// Create table if not exists
+	// 테이블 생성
 	_, err = db.Exec(`
-      CREATE TABLE IF NOT EXISTS chats (
-         id SERIAL PRIMARY KEY,
-         start_with_doctor BOOLEAN NOT NULL,
-         text TEXT NOT NULL,
-         risk_score INTEGER NOT NULL,
-         memo TEXT,
-         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-   `)
+		CREATE TABLE IF NOT EXISTS chats (
+			id SERIAL PRIMARY KEY,
+			start_with_doctor BOOLEAN NOT NULL,
+			text TEXT NOT NULL,
+			risk_score INTEGER NOT NULL,
+			memo TEXT,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
 	if err != nil {
 		log.Fatalf("Failed to create table: %v", err)
 	}
 	log.Println("Database table checked/created")
 
-	// Initialize Gin router
+	// Gin 라우터 초기화
 	r := gin.Default()
 
-	// CORS middleware
+	// CORS 미들웨어
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -89,7 +99,7 @@ func main() {
 		c.Next()
 	})
 
-	// Routes
+	// 라우트 설정
 	r.GET("/chats", getChats)
 	r.GET("/chats/:id", getChat)
 	r.POST("/chats", createChat)
@@ -97,7 +107,7 @@ func main() {
 	r.DELETE("/chats/:id", deleteChat)
 	r.POST("/processChat", processChat)
 
-	// Health check endpoint
+	// 헬스 체크 엔드포인트
 	r.GET("/health", func(c *gin.Context) {
 		err := db.Ping()
 		if err != nil {
@@ -107,7 +117,7 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok", "message": "Server is running and connected to the database"})
 	})
 
-	// Start server
+	// 서버 시작
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -163,6 +173,76 @@ func getChat(c *gin.Context) {
 	c.JSON(200, chat)
 }
 
+// ML API와 연동하여 자살 위험도 분석
+type SuicideRiskRequest struct {
+	Text string `json:"text"`
+}
+
+type SuicideRiskResponse struct {
+	Score int `json:"score"`
+}
+
+func analyzeSuicideRisk(text string) (int, error) {
+	url := fmt.Sprintf("%s/suicide-risk", mlAPIURL)
+	reqBody, err := json.Marshal(SuicideRiskRequest{Text: text})
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal suicide risk request: %v", err)
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return 0, fmt.Errorf("failed to make suicide risk API request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("suicide risk API returned error, status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var riskResponse SuicideRiskResponse
+	if err := json.NewDecoder(resp.Body).Decode(&riskResponse); err != nil {
+		return 0, fmt.Errorf("failed to decode suicide risk response: %v", err)
+	}
+
+	return riskResponse.Score, nil
+}
+
+// ML API와 연동하여 감정 분석
+type SentimentRequest struct {
+	Text string `json:"text"`
+}
+
+type SentimentResponse struct {
+	Sentiment string `json:"sentiment"`
+}
+
+func analyzeSentiment(text string) (string, error) {
+	url := fmt.Sprintf("%s/sentiment", mlAPIURL)
+	reqBody, err := json.Marshal(SentimentRequest{Text: text})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal sentiment request: %v", err)
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to make sentiment API request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("sentiment API returned error, status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var sentimentResponse SentimentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&sentimentResponse); err != nil {
+		return "", fmt.Errorf("failed to decode sentiment response: %v", err)
+	}
+
+	return sentimentResponse.Sentiment, nil
+}
+
 func createChat(c *gin.Context) {
 	var input struct {
 		StartWithDoctor *bool   `json:"startWithDoctor"`
@@ -190,27 +270,47 @@ func createChat(c *gin.Context) {
 		chat.StartWithDoctor = false
 	}
 
-	// RiskScore 설정 (기본값: 0)
-	if input.RiskScore != nil {
-		chat.RiskScore = *input.RiskScore
-	} else {
-		chat.RiskScore = 0
-	}
-
-	// Memo 설정 (기본값: 빈 문자열)
-	if input.Memo != nil {
-		chat.Memo = *input.Memo
-	} else {
-		chat.Memo = ""
-	}
-
 	// 필수 필드 확인
 	if chat.Text == "" {
 		c.JSON(400, gin.H{"error": "text field is required"})
 		return
 	}
 
-	err := db.QueryRow(
+	// ML API를 통해 자살 위험도 분석
+	riskScore, err := analyzeSuicideRisk(chat.Text)
+	if err != nil {
+		log.Printf("Error analyzing suicide risk: %v", err)
+		// API 호출 실패 시 수동 입력 값 또는 기본값(0) 사용
+		if input.RiskScore != nil {
+			chat.RiskScore = *input.RiskScore
+		} else {
+			chat.RiskScore = 0
+		}
+	} else {
+		// API에서 받은 위험도 점수 사용 (이미 설정된 경우 재정의)
+		chat.RiskScore = riskScore
+	}
+
+	// ML API를 통해 감정 분석
+	sentiment, err := analyzeSentiment(chat.Text)
+	if err != nil {
+		log.Printf("Error analyzing sentiment: %v", err)
+		// 감정 분석은 memo로 저장, 실패 시 입력 memo 사용
+		if input.Memo != nil {
+			chat.Memo = *input.Memo
+		} else {
+			chat.Memo = ""
+		}
+	} else {
+		// 분석된 감정을 memo에 저장하되, 사용자 memo가 있으면 합쳐서 저장
+		if input.Memo != nil && *input.Memo != "" {
+			chat.Memo = fmt.Sprintf("Sentiment: %s | %s", sentiment, *input.Memo)
+		} else {
+			chat.Memo = fmt.Sprintf("Sentiment: %s", sentiment)
+		}
+	}
+
+	err = db.QueryRow(
 		"INSERT INTO chats (start_with_doctor, text, risk_score, memo, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id",
 		chat.StartWithDoctor, chat.Text, chat.RiskScore, chat.Memo, chat.CreatedAt,
 	).Scan(&chat.ID)
