@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -36,18 +37,37 @@ func main() {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
+	log.Printf("Connecting to database with URL: %s", dbURL)
+	
 	var err error
 	db, err = sql.Open("postgres", dbURL)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to open database connection: %v", err)
 	}
 	defer db.Close()
 
 	// Test the connection
 	err = db.Ping()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to ping database: %v", err)
 	}
+	log.Println("Successfully connected to the database")
+
+	// Create table if not exists
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS chats (
+			id SERIAL PRIMARY KEY,
+			start_with_doctor BOOLEAN NOT NULL,
+			text TEXT NOT NULL,
+			risk_score INTEGER NOT NULL,
+			memo TEXT,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create table: %v", err)
+	}
+	log.Println("Database table checked/created")
 
 	// Initialize Gin router
 	r := gin.Default()
@@ -71,17 +91,29 @@ func main() {
 	r.PUT("/chats/:id", updateChat)
 	r.DELETE("/chats/:id", deleteChat)
 
+	// Health check endpoint
+	r.GET("/health", func(c *gin.Context) {
+		err := db.Ping()
+		if err != nil {
+			c.JSON(500, gin.H{"status": "error", "message": fmt.Sprintf("Database connection failed: %v", err)})
+			return
+		}
+		c.JSON(200, gin.H{"status": "ok", "message": "Server is running and connected to the database"})
+	})
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
+	log.Printf("Server starting on port %s", port)
 	r.Run(":" + port)
 }
 
 func getChats(c *gin.Context) {
 	rows, err := db.Query("SELECT id, start_with_doctor, text, risk_score, memo, created_at FROM chats ORDER BY created_at DESC")
 	if err != nil {
+		log.Printf("Error querying chats: %v", err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -92,10 +124,17 @@ func getChats(c *gin.Context) {
 		var chat Chat
 		err := rows.Scan(&chat.ID, &chat.StartWithDoctor, &chat.Text, &chat.RiskScore, &chat.Memo, &chat.CreatedAt)
 		if err != nil {
+			log.Printf("Error scanning chat row: %v", err)
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 		chats = append(chats, chat)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error after scanning rows: %v", err)
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(200, chats)
@@ -111,6 +150,7 @@ func getChat(c *gin.Context) {
 			c.JSON(404, gin.H{"error": "Chat not found"})
 			return
 		}
+		log.Printf("Error retrieving chat with ID %s: %v", id, err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -120,6 +160,7 @@ func getChat(c *gin.Context) {
 func createChat(c *gin.Context) {
 	var chat Chat
 	if err := c.ShouldBindJSON(&chat); err != nil {
+		log.Printf("Error binding JSON: %v", err)
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
@@ -131,6 +172,7 @@ func createChat(c *gin.Context) {
 	).Scan(&chat.ID)
 
 	if err != nil {
+		log.Printf("Error creating chat: %v", err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -142,6 +184,7 @@ func updateChat(c *gin.Context) {
 	id := c.Param("id")
 	var chat Chat
 	if err := c.ShouldBindJSON(&chat); err != nil {
+		log.Printf("Error binding JSON: %v", err)
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
@@ -151,12 +194,14 @@ func updateChat(c *gin.Context) {
 		chat.StartWithDoctor, chat.Text, chat.RiskScore, chat.Memo, id,
 	)
 	if err != nil {
+		log.Printf("Error updating chat with ID %s: %v", id, err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -173,12 +218,14 @@ func deleteChat(c *gin.Context) {
 	id := c.Param("id")
 	result, err := db.Exec("DELETE FROM chats WHERE id = $1", id)
 	if err != nil {
+		log.Printf("Error deleting chat with ID %s: %v", id, err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
