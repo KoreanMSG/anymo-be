@@ -12,7 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
-	"google.golang.org/genai"
+
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/option"
 )
 
 type Chat struct {
@@ -378,14 +380,16 @@ func callLLMDirect(originalText string) (string, bool, error) {
 	defer cancel()
 
 	// Create a Gemini client using your API key.
-	// The Gemini client constructor may vary according to the SDK.
-	client, err := genai.NewClient(os.Getenv("GEMINI_API_KEY"))
+	// (Note: The new Gemini API client does not require a project or location.)
+	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create Gemini client: %v", err)
 	}
+	defer client.Close()
 
-	// Instantiate the model with the desired version. You can change the model name if needed.
-	model := client.GenerativeModel("gemini-1.5-pro-latest")
+	// Instantiate the model with the desired version.
+	// (You can change the model name if needed; for example "gemini-2.0-flash" is also available.)
+	model := client.GenerativeModel("gemini-2.0-flash-lite-001")
 	// Tell the model to output JSON.
 	model.ResponseMIMEType = "application/json"
 	// Provide a JSON schema so that the model always responds with our expected format.
@@ -399,8 +403,7 @@ func callLLMDirect(originalText string) (string, bool, error) {
 				Type: genai.TypeBoolean,
 			},
 		},
-		Required:         []string{"updatedText", "startWithDoctor"},
-		PropertyOrdering: []string{"updatedText", "startWithDoctor"},
+		Required: []string{"updatedText", "startWithDoctor"},
 	}
 
 	// Construct the prompt, instructing the model to process the dialogue.
@@ -413,20 +416,19 @@ func callLLMDirect(originalText string) (string, bool, error) {
 	)
 
 	// Generate content using the Gemini model.
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	respGen, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", false, fmt.Errorf("LLM API error: %v", err)
 	}
 
 	// Ensure that we have at least one candidate in the response.
-	if len(resp.Candidates) == 0 {
+	if len(respGen.Candidates) == 0 {
 		return "", false, fmt.Errorf("no candidates returned from LLM")
 	}
 
 	// Extract the JSON response from the first candidate.
 	var jsonResponse string
-	for _, part := range resp.Candidates[0].Content.Parts {
-		// The SDK should define a Text type; adjust the type assertion as needed.
+	for _, part := range respGen.Candidates[0].Content.Parts {
 		if textPart, ok := part.(genai.Text); ok {
 			jsonResponse = string(textPart)
 			break
@@ -436,16 +438,14 @@ func callLLMDirect(originalText string) (string, bool, error) {
 		return "", false, fmt.Errorf("failed to retrieve JSON response from LLM")
 	}
 
-	// Define a structure to capture the expected JSON.
+	// Decode the JSON response.
 	var result struct {
 		UpdatedText     string `json:"updatedText"`
 		StartWithDoctor bool   `json:"startWithDoctor"`
 	}
-	// Decode the JSON response.
 	if err := json.Unmarshal([]byte(jsonResponse), &result); err != nil {
 		return "", false, fmt.Errorf("failed to decode JSON response: %v", err)
 	}
 
-	// Return the updated dialogue and the boolean flag.
 	return result.UpdatedText, result.StartWithDoctor, nil
 }
