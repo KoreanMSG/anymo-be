@@ -158,14 +158,52 @@ func getChat(c *gin.Context) {
 }
 
 func createChat(c *gin.Context) {
-	var chat Chat
-	if err := c.ShouldBindJSON(&chat); err != nil {
+	var input struct {
+		StartWithDoctor *bool   `json:"startWithDoctor"`
+		Text            string  `json:"text"`
+		RiskScore       *int    `json:"riskScore"`
+		Memo            *string `json:"memo"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
 		log.Printf("Error binding JSON: %v", err)
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	chat.CreatedAt = time.Now()
+	// 기본값 설정
+	chat := Chat{
+		CreatedAt: time.Now(),
+		Text:      input.Text,
+	}
+
+	// StartWithDoctor 설정 (기본값: false)
+	if input.StartWithDoctor != nil {
+		chat.StartWithDoctor = *input.StartWithDoctor
+	} else {
+		chat.StartWithDoctor = false
+	}
+
+	// RiskScore 설정 (기본값: 0)
+	if input.RiskScore != nil {
+		chat.RiskScore = *input.RiskScore
+	} else {
+		chat.RiskScore = 0
+	}
+
+	// Memo 설정 (기본값: 빈 문자열)
+	if input.Memo != nil {
+		chat.Memo = *input.Memo
+	} else {
+		chat.Memo = ""
+	}
+
+	// 필수 필드 확인
+	if chat.Text == "" {
+		c.JSON(400, gin.H{"error": "text field is required"})
+		return
+	}
+
 	err := db.QueryRow(
 		"INSERT INTO chats (start_with_doctor, text, risk_score, memo, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id",
 		chat.StartWithDoctor, chat.Text, chat.RiskScore, chat.Memo, chat.CreatedAt,
@@ -182,16 +220,57 @@ func createChat(c *gin.Context) {
 
 func updateChat(c *gin.Context) {
 	id := c.Param("id")
-	var chat Chat
-	if err := c.ShouldBindJSON(&chat); err != nil {
+	
+	// 기존 채팅 데이터 조회
+	var existingChat Chat
+	err := db.QueryRow("SELECT id, start_with_doctor, text, risk_score, memo, created_at FROM chats WHERE id = $1", id).
+		Scan(&existingChat.ID, &existingChat.StartWithDoctor, &existingChat.Text, &existingChat.RiskScore, &existingChat.Memo, &existingChat.CreatedAt)
+	
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(404, gin.H{"error": "Chat not found"})
+			return
+		}
+		log.Printf("Error retrieving existing chat with ID %s: %v", id, err)
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	
+	// 입력 구조체
+	var input struct {
+		StartWithDoctor *bool   `json:"startWithDoctor"`
+		Text            *string `json:"text"`
+		RiskScore       *int    `json:"riskScore"`
+		Memo            *string `json:"memo"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
 		log.Printf("Error binding JSON: %v", err)
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
+	// 입력된 값이 있으면 업데이트
+	if input.StartWithDoctor != nil {
+		existingChat.StartWithDoctor = *input.StartWithDoctor
+	}
+	
+	if input.Text != nil {
+		existingChat.Text = *input.Text
+	}
+	
+	if input.RiskScore != nil {
+		existingChat.RiskScore = *input.RiskScore
+	}
+	
+	if input.Memo != nil {
+		existingChat.Memo = *input.Memo
+	}
+
+	// 데이터베이스 업데이트
 	result, err := db.Exec(
 		"UPDATE chats SET start_with_doctor = $1, text = $2, risk_score = $3, memo = $4 WHERE id = $5",
-		chat.StartWithDoctor, chat.Text, chat.RiskScore, chat.Memo, id,
+		existingChat.StartWithDoctor, existingChat.Text, existingChat.RiskScore, existingChat.Memo, id,
 	)
 	if err != nil {
 		log.Printf("Error updating chat with ID %s: %v", id, err)
@@ -211,7 +290,7 @@ func updateChat(c *gin.Context) {
 		return
 	}
 
-	c.JSON(200, chat)
+	c.JSON(200, existingChat)
 }
 
 func deleteChat(c *gin.Context) {
