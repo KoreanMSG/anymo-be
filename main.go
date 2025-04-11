@@ -33,20 +33,20 @@ var db *sql.DB
 var mlAPIURL = "https://anymo-ml.onrender.com"
 
 func main() {
-	// 로컬 개발 환경에서만 .env 파일 로드 (production이 아닌 경우)
+	// Load .env file only in development environment (not in production)
 	if os.Getenv("ENVIRONMENT") != "production" {
 		if err := godotenv.Load(); err != nil {
 			log.Println("No .env file found, using environment variables")
 		}
 	}
 
-	// ML API URL 환경변수 확인
+	// Check ML API URL environment variable
 	if envMLAPIURL := os.Getenv("ML_API_URL"); envMLAPIURL != "" {
 		mlAPIURL = envMLAPIURL
 	}
 	log.Printf("Using ML API URL: %s", mlAPIURL)
 
-	// 데이터베이스 연결 설정
+	// Database connection setup
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL environment variable is required")
@@ -61,14 +61,14 @@ func main() {
 	}
 	defer db.Close()
 
-	// 연결 테스트
+	// Test connection
 	err = db.Ping()
 	if err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 	log.Println("Successfully connected to the database")
 
-	// 테이블 생성
+	// Create table if not exists
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS chats (
 			id SERIAL PRIMARY KEY,
@@ -84,10 +84,10 @@ func main() {
 	}
 	log.Println("Database table checked/created")
 
-	// Gin 라우터 초기화
+	// Initialize Gin router
 	r := gin.Default()
 
-	// CORS 미들웨어
+	// CORS middleware
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -99,7 +99,7 @@ func main() {
 		c.Next()
 	})
 
-	// 라우트 설정
+	// Routes setup
 	r.GET("/chats", getChats)
 	r.GET("/chats/:id", getChat)
 	r.POST("/chats", createChat)
@@ -107,7 +107,7 @@ func main() {
 	r.DELETE("/chats/:id", deleteChat)
 	r.POST("/processChat", processChat)
 
-	// 헬스 체크 엔드포인트
+	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
 		err := db.Ping()
 		if err != nil {
@@ -117,7 +117,7 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok", "message": "Server is running and connected to the database"})
 	})
 
-	// 서버 시작
+	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -173,7 +173,7 @@ func getChat(c *gin.Context) {
 	c.JSON(200, chat)
 }
 
-// ML API와 연동하여 자살 위험도 분석
+// Suicide risk analysis integration with ML API
 type SuicideRiskRequest struct {
 	Text string `json:"text"`
 }
@@ -208,7 +208,7 @@ func analyzeSuicideRisk(text string) (int, error) {
 	return riskResponse.Score, nil
 }
 
-// ML API와 연동하여 감정 분석
+// Sentiment analysis integration with ML API
 type SentimentRequest struct {
 	Text string `json:"text"`
 }
@@ -257,52 +257,52 @@ func createChat(c *gin.Context) {
 		return
 	}
 
-	// 기본값 설정
+	// Set default values
 	chat := Chat{
 		CreatedAt: time.Now(),
 		Text:      input.Text,
 	}
 
-	// StartWithDoctor 설정 (기본값: false)
+	// Set StartWithDoctor (default: false)
 	if input.StartWithDoctor != nil {
 		chat.StartWithDoctor = *input.StartWithDoctor
 	} else {
 		chat.StartWithDoctor = false
 	}
 
-	// 필수 필드 확인
+	// Check required fields
 	if chat.Text == "" {
 		c.JSON(400, gin.H{"error": "text field is required"})
 		return
 	}
 
-	// ML API를 통해 자살 위험도 분석
+	// Analyze suicide risk via ML API
 	riskScore, err := analyzeSuicideRisk(chat.Text)
 	if err != nil {
 		log.Printf("Error analyzing suicide risk: %v", err)
-		// API 호출 실패 시 수동 입력 값 또는 기본값(0) 사용
+		// Use manual input or default value (0) if API call fails
 		if input.RiskScore != nil {
 			chat.RiskScore = *input.RiskScore
 		} else {
 			chat.RiskScore = 0
 		}
 	} else {
-		// API에서 받은 위험도 점수 사용 (이미 설정된 경우 재정의)
+		// Use risk score from API (overriding any manual input)
 		chat.RiskScore = riskScore
 	}
 
-	// ML API를 통해 감정 분석
+	// Analyze sentiment via ML API
 	sentiment, err := analyzeSentiment(chat.Text)
 	if err != nil {
 		log.Printf("Error analyzing sentiment: %v", err)
-		// 감정 분석은 memo로 저장, 실패 시 입력 memo 사용
+		// Use input memo or empty string if sentiment analysis fails
 		if input.Memo != nil {
 			chat.Memo = *input.Memo
 		} else {
 			chat.Memo = ""
 		}
 	} else {
-		// 분석된 감정을 memo에 저장하되, 사용자 memo가 있으면 합쳐서 저장
+		// Store sentiment in memo, combine with user memo if provided
 		if input.Memo != nil && *input.Memo != "" {
 			chat.Memo = fmt.Sprintf("Sentiment: %s | %s", sentiment, *input.Memo)
 		} else {
@@ -327,7 +327,7 @@ func createChat(c *gin.Context) {
 func updateChat(c *gin.Context) {
 	id := c.Param("id")
 
-	// 기존 채팅 데이터 조회
+	// Retrieve existing chat data
 	var existingChat Chat
 	err := db.QueryRow("SELECT id, start_with_doctor, text, risk_score, memo, created_at FROM chats WHERE id = $1", id).
 		Scan(&existingChat.ID, &existingChat.StartWithDoctor, &existingChat.Text, &existingChat.RiskScore, &existingChat.Memo, &existingChat.CreatedAt)
@@ -342,7 +342,7 @@ func updateChat(c *gin.Context) {
 		return
 	}
 
-	// 입력 구조체
+	// Input structure
 	var input struct {
 		StartWithDoctor *bool   `json:"startWithDoctor"`
 		Text            *string `json:"text"`
@@ -356,7 +356,7 @@ func updateChat(c *gin.Context) {
 		return
 	}
 
-	// 입력된 값이 있으면 업데이트
+	// Update values if provided in input
 	if input.StartWithDoctor != nil {
 		existingChat.StartWithDoctor = *input.StartWithDoctor
 	}
@@ -373,7 +373,7 @@ func updateChat(c *gin.Context) {
 		existingChat.Memo = *input.Memo
 	}
 
-	// 데이터베이스 업데이트
+	// Update database
 	result, err := db.Exec(
 		"UPDATE chats SET start_with_doctor = $1, text = $2, risk_score = $3, memo = $4 WHERE id = $5",
 		existingChat.StartWithDoctor, existingChat.Text, existingChat.RiskScore, existingChat.Memo, id,
