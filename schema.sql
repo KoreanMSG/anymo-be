@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS chats (
+    id SERIAL PRIMARY KEY,
+    start_with_doctor BOOLEAN NOT NULL,
+    text TEXT NOT NULL,
+    risk_score INTEGER NOT NULL,
+    memo TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+); 

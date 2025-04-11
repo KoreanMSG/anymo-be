@@ -2,125 +2,185 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
-	"fmt"
 	"log"
-	"net/http"
 	"os"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"github.com/joho/godotenv"
 )
 
-var url = "postgresql://anymodb_user:lQ11owYzyp03O7tRibPL2gonpJYiZ3pB@dpg-cvsd7j95pdvs73bjq0gg-a.singapore-postgres.render.com/anymodb"
-
-var host = url
-var port = 5432
-var user = os.Getenv("USERNAME")
-var password = os.Getenv("PASSWORD")
-var dbname = "anymodb"
+type Chat struct {
+	ID             int       `json:"id"`
+	StartWithDoctor bool     `json:"startWithDoctor"`
+	Text           string    `json:"text"`
+	RiskScore      int       `json:"riskScore"`
+	Memo           string    `json:"memo"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
 
 var db *sql.DB
 
-type User struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}
-
 func main() {
-	pgConnStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
-
-	conn, err := sql.Open("postgres", pgConnStr)
-	if err != nil {
-		log.Fatalf("Error opening database connection: %v", err)
+	// Load environment variables
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found")
 	}
-	db = conn
+
+	// Database connection
+	connStr := "postgresql://anymodb_user:lQ11owYzyp03O7tRibPL2gonpJYiZ3pB@dpg-cvsd7j95pdvs73bjq0gg-a.singapore-postgres.render.com/anymodb?sslmode=require"
+	var err error
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer db.Close()
 
+	// Test the connection
 	err = db.Ping()
 	if err != nil {
-		log.Fatalf("Error connecting to the database: %v", err)
+		log.Fatal(err)
 	}
-	fmt.Println("Connected to the PostgreSQL database")
 
-	http.HandleFunc("/users", getUsers)
-	http.HandleFunc("/users/add", addUser)
-	http.HandleFunc("/users/update", updateUser)
-	http.HandleFunc("/users/delete", deleteUser)
+	// Initialize Gin router
+	r := gin.Default()
 
-	fmt.Println("Server is listening on port 8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// CORS middleware
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
+	// Routes
+	r.GET("/chats", getChats)
+	r.GET("/chats/:id", getChat)
+	r.POST("/chats", createChat)
+	r.PUT("/chats/:id", updateChat)
+	r.DELETE("/chats/:id", deleteChat)
+
+	// Start server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	r.Run(":" + port)
 }
 
-func getUsers(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, name, email FROM users")
+func getChats(c *gin.Context) {
+	rows, err := db.Query("SELECT id, start_with_doctor, text, risk_score, memo, created_at FROM chats ORDER BY created_at DESC")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	defer rows.Close()
 
-	var users []User
+	var chats []Chat
 	for rows.Next() {
-		var user User
-		err := rows.Scan(&user.ID, &user.Name, &user.Email)
+		var chat Chat
+		err := rows.Scan(&chat.ID, &chat.StartWithDoctor, &chat.Text, &chat.RiskScore, &chat.Memo, &chat.CreatedAt)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-		users = append(users, user)
+		chats = append(chats, chat)
 	}
 
-	json.NewEncoder(w).Encode(users)
+	c.JSON(200, chats)
 }
 
-func addUser(w http.ResponseWriter, r *http.Request) {
-	var user User
-	err := json.NewDecoder(r.Body).Decode(&user)
+func getChat(c *gin.Context) {
+	id := c.Param("id")
+	var chat Chat
+	err := db.QueryRow("SELECT id, start_with_doctor, text, risk_score, memo, created_at FROM chats WHERE id = $1", id).
+		Scan(&chat.ID, &chat.StartWithDoctor, &chat.Text, &chat.RiskScore, &chat.Memo, &chat.CreatedAt)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		if err == sql.ErrNoRows {
+			c.JSON(404, gin.H{"error": "Chat not found"})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-
-	_, err = db.Exec("INSERT INTO users (name, email) VALUES ($1, $2)", user.Name, user.Email)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "User added successfully")
+	c.JSON(200, chat)
 }
 
-func updateUser(w http.ResponseWriter, r *http.Request) {
-	var user User
-	err := json.NewDecoder(r.Body).Decode(&user)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+func createChat(c *gin.Context) {
+	var chat Chat
+	if err := c.ShouldBindJSON(&chat); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	_, err = db.Exec("UPDATE users SET name=$1, email=$2 WHERE id=$3", user.Name, user.Email, user.ID)
+	chat.CreatedAt = time.Now()
+	err := db.QueryRow(
+		"INSERT INTO chats (start_with_doctor, text, risk_score, memo, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+		chat.StartWithDoctor, chat.Text, chat.RiskScore, chat.Memo, chat.CreatedAt,
+	).Scan(&chat.ID)
+
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
-	fmt.Fprintf(w, "User updated successfully")
+	c.JSON(201, chat)
 }
 
-func deleteUser(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "ID parameter is required", http.StatusBadRequest)
+func updateChat(c *gin.Context) {
+	id := c.Param("id")
+	var chat Chat
+	if err := c.ShouldBindJSON(&chat); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	_, err := db.Exec("DELETE FROM users WHERE id=$1", id)
+	result, err := db.Exec(
+		"UPDATE chats SET start_with_doctor = $1, text = $2, risk_score = $3, memo = $4 WHERE id = $5",
+		chat.StartWithDoctor, chat.Text, chat.RiskScore, chat.Memo, id,
+	)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
-	fmt.Fprintf(w, "User deleted successfully")
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	if rowsAffected == 0 {
+		c.JSON(404, gin.H{"error": "Chat not found"})
+		return
+	}
+
+	c.JSON(200, chat)
+}
+
+func deleteChat(c *gin.Context) {
+	id := c.Param("id")
+	result, err := db.Exec("DELETE FROM chats WHERE id = $1", id)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	if rowsAffected == 0 {
+		c.JSON(404, gin.H{"error": "Chat not found"})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Chat deleted successfully"})
 }
