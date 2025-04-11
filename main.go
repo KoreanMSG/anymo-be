@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,7 +24,7 @@ type Chat struct {
 var db *sql.DB
 
 func main() {
-	// 개발 환경에서만 .env 파일 로드
+	// 로컬 개발 환경에서만 .env 파일 로드 (production이 아닌 경우)
 	if os.Getenv("ENVIRONMENT") != "production" {
 		if err := godotenv.Load(); err != nil {
 			log.Println("No .env file found, using environment variables")
@@ -33,45 +32,12 @@ func main() {
 	}
 
 	// 데이터베이스 연결 설정
-	var dbURL string
-
-	// 로컬 환경 또는 배포 환경 감지
-	useLocalDB := os.Getenv("USE_LOCAL_DB")
-	
-	if useLocalDB == "true" {
-		// 로컬 데이터베이스 연결 정보
-		host := os.Getenv("DB_HOST")
-		if host == "" {
-			host = "localhost"
-		}
-		
-		portStr := os.Getenv("DB_PORT")
-		port, err := strconv.Atoi(portStr)
-		if err != nil || portStr == "" {
-			port = 5432
-		}
-		
-		user := os.Getenv("DB_USER")
-		password := os.Getenv("DB_PASSWORD")
-		dbname := os.Getenv("DB_NAME")
-		if dbname == "" {
-			dbname = "anymodb"
-		}
-		
-		dbURL = fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", 
-			host, port, user, password, dbname)
-		
-		log.Printf("Using local database configuration: host=%s, port=%d, dbname=%s", host, port, dbname)
-	} else {
-		// Render 등의 배포 환경 URL 사용
-		dbURL = os.Getenv("DATABASE_URL")
-		if dbURL == "" {
-			log.Fatal("DATABASE_URL environment variable is required when USE_LOCAL_DB is not set to true")
-		}
-		log.Println("Using DATABASE_URL configuration")
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	log.Printf("Connecting to database...")
+	log.Println("Connecting to database...")
 	
 	var err error
 	db, err = sql.Open("postgres", dbURL)

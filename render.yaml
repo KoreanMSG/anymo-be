@@ -13,7 +13,5 @@ services:
         value: postgresql://anymodb_user:lQ11owYzyp03O7tRibPL2gonpJYiZ3pB@dpg-cvsd7j95pdvs73bjq0gg-a.singapore-postgres.render.com/anymodb
       - key: ENVIRONMENT
         value: production
-      - key: USE_LOCAL_DB
-        value: false
     healthCheckPath: /health
     autoDeploy: true 
