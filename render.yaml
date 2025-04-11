@@ -4,12 +4,14 @@ services:
     env: go
     region: singapore
     plan: free
-    buildCommand: cd backend && go build -tags netgo -ldflags '-s -w' -o main
-    startCommand: cd backend && ./main
+    buildCommand: go build -tags netgo -ldflags '-s -w' -o main
+    startCommand: ./main
     envVars:
       - key: PORT
         value: 8080
       - key: DATABASE_URL
         value: postgresql://anymodb_user:lQ11owYzyp03O7tRibPL2gonpJYiZ3pB@dpg-cvsd7j95pdvs73bjq0gg-a.singapore-postgres.render.com/anymodb
-    healthCheckPath: /chats
+      - key: ENVIRONMENT
+        value: production
+    healthCheckPath: /health
     autoDeploy: true 
