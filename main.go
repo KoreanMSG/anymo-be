@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -20,45 +22,72 @@ type Chat struct {
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
-var host = "localhost"
-
-// var host = os.Getenv("databaseURL")
-var port = 5432
-var user = os.Getenv("username")
-var password = os.Getenv("password")
-var dbname = "anymodb"
-
 var db *sql.DB
 
 func main() {
-	pgConnStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
-
-	conn, err := sql.Open("postgres", pgConnStr)
-	if err != nil {
-		log.Fatalf("Error opening database connection: %v", err)
+	// 개발 환경에서만 .env 파일 로드
+	if os.Getenv("ENVIRONMENT") != "production" {
+		if err := godotenv.Load(); err != nil {
+			log.Println("No .env file found, using environment variables")
+		}
 	}
-	db = conn
-	defer db.Close()
 
-	err = db.Ping()
-	if err != nil {
-		log.Fatalf("Error connecting to the database: %v", err)
+	// 데이터베이스 연결 설정
+	var dbURL string
+
+	// 로컬 환경 또는 배포 환경 감지
+	useLocalDB := os.Getenv("USE_LOCAL_DB")
+	
+	if useLocalDB == "true" {
+		// 로컬 데이터베이스 연결 정보
+		host := os.Getenv("DB_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		
+		portStr := os.Getenv("DB_PORT")
+		port, err := strconv.Atoi(portStr)
+		if err != nil || portStr == "" {
+			port = 5432
+		}
+		
+		user := os.Getenv("DB_USER")
+		password := os.Getenv("DB_PASSWORD")
+		dbname := os.Getenv("DB_NAME")
+		if dbname == "" {
+			dbname = "anymodb"
+		}
+		
+		dbURL = fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", 
+			host, port, user, password, dbname)
+		
+		log.Printf("Using local database configuration: host=%s, port=%d, dbname=%s", host, port, dbname)
+	} else {
+		// Render 등의 배포 환경 URL 사용
+		dbURL = os.Getenv("DATABASE_URL")
+		if dbURL == "" {
+			log.Fatal("DATABASE_URL environment variable is required when USE_LOCAL_DB is not set to true")
+		}
+		log.Println("Using DATABASE_URL configuration")
 	}
-	fmt.Println("Connected to the PostgreSQL database")
-	db, err = sql.Open("postgres", host)
+
+	log.Printf("Connecting to database...")
+	
+	var err error
+	db, err = sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("Failed to open database connection: %v", err)
 	}
 	defer db.Close()
 
-	// Test the connection
+	// 연결 테스트
 	err = db.Ping()
 	if err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 	log.Println("Successfully connected to the database")
 
-	// Create table if not exists
+	// 테이블 생성
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS chats (
 			id SERIAL PRIMARY KEY,
@@ -74,10 +103,10 @@ func main() {
 	}
 	log.Println("Database table checked/created")
 
-	// Initialize Gin router
+	// Gin 라우터 초기화
 	r := gin.Default()
 
-	// CORS middleware
+	// CORS 미들웨어
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -89,14 +118,14 @@ func main() {
 		c.Next()
 	})
 
-	// Routes
+	// 라우트 설정
 	r.GET("/chats", getChats)
 	r.GET("/chats/:id", getChat)
 	r.POST("/chats", createChat)
 	r.PUT("/chats/:id", updateChat)
 	r.DELETE("/chats/:id", deleteChat)
 
-	// Health check endpoint
+	// 헬스 체크 엔드포인트
 	r.GET("/health", func(c *gin.Context) {
 		err := db.Ping()
 		if err != nil {
@@ -106,7 +135,7 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok", "message": "Server is running and connected to the database"})
 	})
 
-	// Start server
+	// 서버 시작
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
