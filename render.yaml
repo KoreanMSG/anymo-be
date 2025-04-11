@@ -4,7 +4,7 @@ services:
     env: go
     region: singapore
     plan: free
-    buildCommand: cd backend && go build -o main .
+    buildCommand: cd backend && go build -tags netgo -ldflags '-s -w' -o main
     startCommand: cd backend && ./main
     envVars:
       - key: PORT

@@ -7,33 +7,35 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	_ "github.com/lib/pq"
 	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type Chat struct {
-	ID             int       `json:"id"`
-	StartWithDoctor bool     `json:"startWithDoctor"`
-	Text           string    `json:"text"`
-	RiskScore      int       `json:"riskScore"`
-	Memo           string    `json:"memo"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID              int       `json:"id"`
+	StartWithDoctor bool      `json:"startWithDoctor"`
+	Text            string    `json:"text"`
+	RiskScore       int       `json:"riskScore"`
+	Memo            string    `json:"memo"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
 var db *sql.DB
 
 func main() {
-	// Load environment variables
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+	// Load environment variables only in development
+	if os.Getenv("ENVIRONMENT") != "production" {
+		if err := godotenv.Load(); err != nil {
+			log.Println("No .env file found")
+		}
 	}
 
 	// Database connection
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgresql://anymodb_user:lQ11owYzyp03O7tRibPL2gonpJYiZ3pB@dpg-cvsd7j95pdvs73bjq0gg-a.singapore-postgres.render.com/anymodb?sslmode=require"
+		log.Fatal("DATABASE_URL environment variable is required")
 	}
-	
+
 	var err error
 	db, err = sql.Open("postgres", dbURL)
 	if err != nil {
