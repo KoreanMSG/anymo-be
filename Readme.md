@@ -5,6 +5,30 @@
 - **Base URL**: `https://hsil-korean-msg-api.onrender.com`
 - **Content Type**: `application/json`
 
+## Development Setup
+
+### Prerequisites
+- Go 1.16+
+- PostgreSQL (원격 데이터베이스 사용)
+
+### Local Setup
+1. Clone the repository
+2. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+3. 필요시 .env 파일의 DATABASE_URL이나 PORT를 수정
+4. Build and run the application:
+   ```bash
+   go build -o main
+   ./main
+   ```
+
+### Environment Variables
+- `DATABASE_URL`: 데이터베이스 접속 정보 (기본값은 Render에 배포된 PostgreSQL 데이터베이스)
+- `ENVIRONMENT`: "development" 또는 "production" (로컬 개발 환경에서는 "development")
+- `PORT`: 서버 포트 (기본값: 8080)
+
 ## Chat API Endpoints
 
 ### 1. Get All Chats
