@@ -29,9 +29,13 @@ func main() {
 	}
 
 	// Database connection
-	connStr := "postgresql://anymodb_user:lQ11owYzyp03O7tRibPL2gonpJYiZ3pB@dpg-cvsd7j95pdvs73bjq0gg-a.singapore-postgres.render.com/anymodb?sslmode=require"
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgresql://anymodb_user:lQ11owYzyp03O7tRibPL2gonpJYiZ3pB@dpg-cvsd7j95pdvs73bjq0gg-a.singapore-postgres.render.com/anymodb?sslmode=require"
+	}
+	
 	var err error
-	db, err = sql.Open("postgres", connStr)
+	db, err = sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal(err)
 	}
