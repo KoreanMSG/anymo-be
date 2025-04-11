@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"google.golang.org/genai"
 )
 
 type Chat struct {
@@ -24,21 +27,21 @@ type Chat struct {
 var db *sql.DB
 
 func main() {
-	// 로컬 개발 환경에서만 .env 파일 로드 (production이 아닌 경우)
+	// Load environment variables only in development
 	if os.Getenv("ENVIRONMENT") != "production" {
 		if err := godotenv.Load(); err != nil {
-			log.Println("No .env file found, using environment variables")
+			log.Println("No .env file found")
 		}
 	}
 
-	// 데이터베이스 연결 설정
+	// Database connection
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	log.Println("Connecting to database...")
-	
+	log.Printf("Connecting to database with URL: %s", dbURL)
+
 	var err error
 	db, err = sql.Open("postgres", dbURL)
 	if err != nil {
@@ -46,33 +49,33 @@ func main() {
 	}
 	defer db.Close()
 
-	// 연결 테스트
+	// Test the connection
 	err = db.Ping()
 	if err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 	log.Println("Successfully connected to the database")
 
-	// 테이블 생성
+	// Create table if not exists
 	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS chats (
-			id SERIAL PRIMARY KEY,
-			start_with_doctor BOOLEAN NOT NULL,
-			text TEXT NOT NULL,
-			risk_score INTEGER NOT NULL,
-			memo TEXT,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
+      CREATE TABLE IF NOT EXISTS chats (
+         id SERIAL PRIMARY KEY,
+         start_with_doctor BOOLEAN NOT NULL,
+         text TEXT NOT NULL,
+         risk_score INTEGER NOT NULL,
+         memo TEXT,
+         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+   `)
 	if err != nil {
 		log.Fatalf("Failed to create table: %v", err)
 	}
 	log.Println("Database table checked/created")
 
-	// Gin 라우터 초기화
+	// Initialize Gin router
 	r := gin.Default()
 
-	// CORS 미들웨어
+	// CORS middleware
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -84,14 +87,15 @@ func main() {
 		c.Next()
 	})
 
-	// 라우트 설정
+	// Routes
 	r.GET("/chats", getChats)
 	r.GET("/chats/:id", getChat)
 	r.POST("/chats", createChat)
 	r.PUT("/chats/:id", updateChat)
 	r.DELETE("/chats/:id", deleteChat)
+	r.POST("/processChat", processChat)
 
-	// 헬스 체크 엔드포인트
+	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
 		err := db.Ping()
 		if err != nil {
@@ -101,7 +105,7 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok", "message": "Server is running and connected to the database"})
 	})
 
-	// 서버 시작
+	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -220,12 +224,12 @@ func createChat(c *gin.Context) {
 
 func updateChat(c *gin.Context) {
 	id := c.Param("id")
-	
+
 	// 기존 채팅 데이터 조회
 	var existingChat Chat
 	err := db.QueryRow("SELECT id, start_with_doctor, text, risk_score, memo, created_at FROM chats WHERE id = $1", id).
 		Scan(&existingChat.ID, &existingChat.StartWithDoctor, &existingChat.Text, &existingChat.RiskScore, &existingChat.Memo, &existingChat.CreatedAt)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			c.JSON(404, gin.H{"error": "Chat not found"})
@@ -235,7 +239,7 @@ func updateChat(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	
+
 	// 입력 구조체
 	var input struct {
 		StartWithDoctor *bool   `json:"startWithDoctor"`
@@ -254,15 +258,15 @@ func updateChat(c *gin.Context) {
 	if input.StartWithDoctor != nil {
 		existingChat.StartWithDoctor = *input.StartWithDoctor
 	}
-	
+
 	if input.Text != nil {
 		existingChat.Text = *input.Text
 	}
-	
+
 	if input.RiskScore != nil {
 		existingChat.RiskScore = *input.RiskScore
 	}
-	
+
 	if input.Memo != nil {
 		existingChat.Memo = *input.Memo
 	}
@@ -315,4 +319,133 @@ func deleteChat(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"message": "Chat deleted successfully"})
+}
+
+type ProcessChatRequest struct {
+	CreatedAt string `json:"createdAt"` // You can parse this into time.Time later if needed.
+	Text      string `json:"text"`
+	Memo      string `json:"memo"`
+}
+
+// Response payload struct
+type ProcessChatResponse struct {
+	CreatedAt       string `json:"createdAt"`
+	Text            string `json:"text"` // This will contain the updated dialogue with "@@" markers.
+	Memo            string `json:"memo"`
+	StartWithDoctor bool   `json:"startWithDoctor"` // Set based on LLM feedback.
+}
+
+// processChat accepts the original conversation data, calls Gemini via callLLMDirect, and returns structured output.
+func processChat(c *gin.Context) {
+	// Define the expected input structure.
+	var req struct {
+		CreatedAt string `json:"createdAt"`
+		Text      string `json:"text"`
+		Memo      string `json:"memo"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Call the Gemini API using the direct REST approach.
+	updatedText, startWithDoctor, err := callLLMDirect(req.Text)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "LLM processing error: " + err.Error()})
+		return
+	}
+
+	// Build the response payload.
+	resp := struct {
+		CreatedAt       string `json:"createdAt"`
+		Text            string `json:"text"`
+		Memo            string `json:"memo"`
+		StartWithDoctor bool   `json:"startWithDoctor"`
+	}{
+		CreatedAt:       req.CreatedAt,
+		Text:            updatedText,
+		Memo:            req.Memo,
+		StartWithDoctor: startWithDoctor,
+	}
+
+	c.JSON(200, resp)
+}
+
+func callLLMDirect(originalText string) (string, bool, error) {
+	// Create a context with timeout for the API call.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Create a Gemini client using your API key.
+	// The Gemini client constructor may vary according to the SDK.
+	client, err := genai.NewClient(os.Getenv("GEMINI_API_KEY"))
+	if err != nil {
+		return "", false, fmt.Errorf("failed to create Gemini client: %v", err)
+	}
+
+	// Instantiate the model with the desired version. You can change the model name if needed.
+	model := client.GenerativeModel("gemini-1.5-pro-latest")
+	// Tell the model to output JSON.
+	model.ResponseMIMEType = "application/json"
+	// Provide a JSON schema so that the model always responds with our expected format.
+	model.ResponseSchema = &genai.Schema{
+		Type: genai.TypeObject,
+		Properties: map[string]*genai.Schema{
+			"updatedText": {
+				Type: genai.TypeString,
+			},
+			"startWithDoctor": {
+				Type: genai.TypeBoolean,
+			},
+		},
+		Required:         []string{"updatedText", "startWithDoctor"},
+		PropertyOrdering: []string{"updatedText", "startWithDoctor"},
+	}
+
+	// Construct the prompt, instructing the model to process the dialogue.
+	prompt := fmt.Sprintf(
+		"Process the conversation below by inserting '@@' markers where the speaker changes. Also determine if the conversation starts with a doctor. Return a JSON object with the following fields:\n"+
+			"  updatedText (string): the conversation with '@@' markers inserted,\n"+
+			"  startWithDoctor (boolean): true if the first utterance is from the doctor, false otherwise.\n"+
+			"Conversation: %s",
+		originalText,
+	)
+
+	// Generate content using the Gemini model.
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", false, fmt.Errorf("LLM API error: %v", err)
+	}
+
+	// Ensure that we have at least one candidate in the response.
+	if len(resp.Candidates) == 0 {
+		return "", false, fmt.Errorf("no candidates returned from LLM")
+	}
+
+	// Extract the JSON response from the first candidate.
+	var jsonResponse string
+	for _, part := range resp.Candidates[0].Content.Parts {
+		// The SDK should define a Text type; adjust the type assertion as needed.
+		if textPart, ok := part.(genai.Text); ok {
+			jsonResponse = string(textPart)
+			break
+		}
+	}
+	if jsonResponse == "" {
+		return "", false, fmt.Errorf("failed to retrieve JSON response from LLM")
+	}
+
+	// Define a structure to capture the expected JSON.
+	var result struct {
+		UpdatedText     string `json:"updatedText"`
+		StartWithDoctor bool   `json:"startWithDoctor"`
+	}
+	// Decode the JSON response.
+	if err := json.Unmarshal([]byte(jsonResponse), &result); err != nil {
+		return "", false, fmt.Errorf("failed to decode JSON response: %v", err)
+	}
+
+	// Return the updated dialogue and the boolean flag.
+	return result.UpdatedText, result.StartWithDoctor, nil
 }
