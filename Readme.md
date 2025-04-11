@@ -1,260 +1,308 @@
-# HSIL 한국어 메시지 API 문서
+# HSIL Korean Message API Documentation
 
-## 기본 정보
+## Base Information
 
-- **기본 URL**: `https://hsil-korean-msg-api.onrender.com`
-- **콘텐츠 타입**: `application/json`
+- **Base URL**: `https://hsil-korean-msg-api.onrender.com`
+- **Content Type**: `application/json`
 
-## 인증
+## Chat API Endpoints
 
-현재 API는 별도의 인증 없이 사용 가능합니다.
-
-## 채팅 API 엔드포인트
-
-### 1. 모든 채팅 목록 조회
+### 1. Get All Chats
 
 ```
 GET /chats
 ```
 
-모든
-채팅 기록을 최신순(생성일 기준 내림차순)으로 반환합니다.
+Returns all chat records sorted by creation date (descending order).
 
-**응답 예시**:
+**Example Response**:
 ```json
 [
   {
     "id": 1,
     "startWithDoctor": true,
-    "text": "안녕하세요, 어떻게 도와드릴까요?@@안녕하세요, 최근에 복통이 있어서요.",
+    "text": "Hello, how can I help you?@@Hi, I've been having abdominal pain recently.",
     "riskScore": 35,
-    "memo": "첫 방문 환자",
+    "memo": "First-time patient",
     "createdAt": "2023-04-10T15:30:00Z"
   },
   {
     "id": 2,
     "startWithDoctor": false,
-    "text": "어떤 증상이 있으신가요?@@머리가 아파요.@@언제부터 아프셨나요?",
+    "text": "What symptoms are you experiencing?@@I have a headache.@@How long have you been having this pain?",
     "riskScore": 65,
-    "memo": "두통 환자",
+    "memo": "Headache patient",
     "createdAt": "2023-04-09T14:15:00Z"
   }
 ]
 ```
 
-### 2. 특정 채팅 조회
+**Example cURL**:
+```bash
+curl -X GET https://hsil-korean-msg-api.onrender.com/chats
+```
+
+### 2. Get Specific Chat
 
 ```
 GET /chats/{id}
 ```
 
-**Path 파라미터**:
-- `id` (필수): 조회할 채팅의 ID
+**Path Parameters**:
+- `id` (required): ID of the chat to retrieve
 
-**응답 예시**:
+**Example Response**:
 ```json
 {
   "id": 1,
   "startWithDoctor": true,
-  "text": "안녕하세요, 어떻게 도와드릴까요?@@안녕하세요, 최근에 복통이 있어서요.",
+  "text": "Hello, how can I help you?@@Hi, I've been having abdominal pain recently.",
   "riskScore": 35,
-  "memo": "첫 방문 환자",
+  "memo": "First-time patient",
   "createdAt": "2023-04-10T15:30:00Z"
 }
 ```
 
-**오류 응답** (채팅을 찾을 수 없는 경우):
+**Example cURL**:
+```bash
+curl -X GET https://hsil-korean-msg-api.onrender.com/chats/1
+```
+
+**Error Response** (chat not found):
 ```json
 {
   "error": "Chat not found"
 }
 ```
 
-### 3. 새 채팅 생성
+### 3. Create New Chat
 
 ```
 POST /chats
 ```
 
-**요청 본문**:
+**Request Body**:
 ```json
 {
-  "startWithDoctor": true,
-  "text": "안녕하세요, 어떻게 도와드릴까요?@@안녕하세요, 복통이 있어서요.",
-  "riskScore": 45,
-  "memo": "복통 환자"
+  "text": "Hello, how can I help you?@@Hi, I've been having abdominal pain."
 }
 ```
 
-**필수 필드**:
-- `startWithDoctor`: 대화 시작자가 의사인지 여부 (boolean)
-- `text`: 메시지 내용 (`@@`로 구분된 대화 내용)
-- `riskScore`: 위험도 점수 (1-100)
+**Required Fields**:
+- `text`: Message content (conversations separated by `@@`)
 
-**선택 필드**:
-- `memo`: 메모 (기본값: 빈 문자열)
+**Optional Fields**:
+- `startWithDoctor`: Whether a doctor started the conversation (boolean, default: false)
+- `riskScore`: Risk score (1-100, default: 0)
+- `memo`: Additional notes (default: empty string)
 
-**응답 예시**:
+**Example Response**:
 ```json
 {
   "id": 3,
-  "startWithDoctor": true,
-  "text": "안녕하세요, 어떻게 도와드릴까요?@@안녕하세요, 복통이 있어서요.",
-  "riskScore": 45,
-  "memo": "복통 환자",
+  "startWithDoctor": false,
+  "text": "Hello, how can I help you?@@Hi, I've been having abdominal pain.",
+  "riskScore": 0,
+  "memo": "",
   "createdAt": "2023-04-11T10:25:30Z"
 }
 ```
 
-### 4. 채팅 업데이트
+**Example cURL**:
+```bash
+curl -X POST https://hsil-korean-msg-api.onrender.com/chats \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello, how can I help you?@@Hi, I've been having abdominal pain."
+  }'
+```
+
+### 4. Update Chat
 
 ```
 PUT /chats/{id}
 ```
 
-**Path 파라미터**:
-- `id` (필수): 업데이트할 채팅의 ID
+**Path Parameters**:
+- `id` (required): ID of the chat to update
 
-**요청 본문**:
+**Request Body** (all fields are optional):
 ```json
 {
-  "startWithDoctor": true,
-  "text": "안녕하세요, 어떻게 도와드릴까요?@@안녕하세요, 복통이 있어서요.@@언제부터 아프셨나요?@@어제부터요.",
-  "riskScore": 50,
-  "memo": "복통 환자 - 추가 증상 확인 필요"
+  "text": "Hello, how can I help you?@@Hi, I've been having abdominal pain.@@How long have you been experiencing this pain?@@Since yesterday."
 }
 ```
 
-**응답 예시**:
+**Optional Fields**:
+- `startWithDoctor`: Whether a doctor started the conversation (boolean)
+- `text`: Message content (conversations separated by `@@`)
+- `riskScore`: Risk score (1-100)
+- `memo`: Additional notes
+
+**Example Response**:
 ```json
 {
   "id": 3,
-  "startWithDoctor": true,
-  "text": "안녕하세요, 어떻게 도와드릴까요?@@안녕하세요, 복통이 있어서요.@@언제부터 아프셨나요?@@어제부터요.",
-  "riskScore": 50,
-  "memo": "복통 환자 - 추가 증상 확인 필요",
+  "startWithDoctor": false,
+  "text": "Hello, how can I help you?@@Hi, I've been having abdominal pain.@@How long have you been experiencing this pain?@@Since yesterday.",
+  "riskScore": 0,
+  "memo": "",
   "createdAt": "2023-04-11T10:25:30Z"
 }
 ```
 
-**오류 응답** (채팅을 찾을 수 없는 경우):
+**Example cURL**:
+```bash
+curl -X PUT https://hsil-korean-msg-api.onrender.com/chats/3 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello, how can I help you?@@Hi, I've been having abdominal pain.@@How long have you been experiencing this pain?@@Since yesterday."
+  }'
+```
+
+**Error Response** (chat not found):
 ```json
 {
   "error": "Chat not found"
 }
 ```
 
-### 5. 채팅 삭제
+### 5. Delete Chat
 
 ```
 DELETE /chats/{id}
 ```
 
-**Path 파라미터**:
-- `id` (필수): 삭제할 채팅의 ID
+**Path Parameters**:
+- `id` (required): ID of the chat to delete
 
-**응답 예시** (성공):
+**Example Response** (success):
 ```json
 {
   "message": "Chat deleted successfully"
 }
 ```
 
-**오류 응답** (채팅을 찾을 수 없는 경우):
+**Example cURL**:
+```bash
+curl -X DELETE https://hsil-korean-msg-api.onrender.com/chats/3
+```
+
+**Error Response** (chat not found):
 ```json
 {
   "error": "Chat not found"
 }
 ```
 
-## 데이터 모델
+## Data Model
 
-### Chat 모델
+### Chat Model
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| id | integer | 채팅 ID (자동 생성) |
-| startWithDoctor | boolean | 대화 시작자가 의사인지 여부 |
-| text | string | `@@`로 구분된 대화 내용 |
-| riskScore | integer | 위험도 점수 (1-100) |
-| memo | string | 메모 (선택 사항) |
-| createdAt | datetime | 생성 시간 (자동 생성) |
+The Chat model follows the database schema:
 
-## Flutter 통합 예제
+| Field | Type | Description |
+|-------|------|-------------|
+| id | integer | Chat ID (auto-generated) |
+| startWithDoctor | boolean | Whether a doctor started the conversation |
+| text | string | Conversation content separated by `@@` |
+| riskScore | integer | Risk score (1-100) |
+| memo | string | Additional notes (optional) |
+| createdAt | datetime | Creation time (auto-generated) |
 
-```dart
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:your_app/models/chat_model.dart';
+## Database Schema
 
-class ChatService {
-  final String baseUrl = 'https://hsil-korean-msg-api.onrender.com';
-  
-  // 모든 채팅 가져오기
-  Future<List<Chat>> getAllChats() async {
-    final response = await http.get(Uri.parse('$baseUrl/chats'));
-    
-    if (response.statusCode == 200) {
-      List<dynamic> data = json.decode(response.body);
-      return data.map((json) => Chat(
-        id: json['id'],
-        startWithDoctor: json['startWithDoctor'],
-        text: json['text'],
-        riskScore: json['riskScore'],
-        memo: json['memo'] ?? '',
-        createdAt: DateTime.parse(json['createdAt']),
-      )).toList();
-    } else {
-      throw Exception('Failed to load chats');
+```sql
+CREATE TABLE IF NOT EXISTS chats (
+    id SERIAL PRIMARY KEY,
+    start_with_doctor BOOLEAN NOT NULL,
+    text TEXT NOT NULL,
+    risk_score INTEGER NOT NULL,
+    memo TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## JavaScript Example
+
+```javascript
+// Example: Get all chats
+async function getAllChats() {
+  try {
+    const response = await fetch('https://hsil-korean-msg-api.onrender.com/chats');
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
     }
+    const data = await response.json();
+    console.log(data);
+    return data;
+  } catch (error) {
+    console.error('Error fetching chats:', error);
   }
-  
-  // 새 채팅 생성
-  Future<Chat> createChat(Chat chat) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/chats'),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'startWithDoctor': chat.startWithDoctor,
-        'text': chat.text,
-        'riskScore': chat.riskScore,
-        'memo': chat.memo,
+}
+
+// Example: Create a new chat
+async function createChat(chatData) {
+  try {
+    const response = await fetch('https://hsil-korean-msg-api.onrender.com/chats', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        startWithDoctor: chatData.startWithDoctor,
+        text: chatData.text,
+        riskScore: chatData.riskScore,
+        memo: chatData.memo
       }),
-    );
+    });
     
-    if (response.statusCode == 201) {
-      Map<String, dynamic> data = json.decode(response.body);
-      return Chat(
-        id: data['id'],
-        startWithDoctor: data['startWithDoctor'],
-        text: data['text'],
-        riskScore: data['riskScore'],
-        memo: data['memo'] ?? '',
-        createdAt: DateTime.parse(data['createdAt']),
-      );
-    } else {
-      throw Exception('Failed to create chat');
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
     }
+    
+    const data = await response.json();
+    console.log('Created chat:', data);
+    return data;
+  } catch (error) {
+    console.error('Error creating chat:', error);
   }
+}
+
+// Example usage
+createChat({
+  startWithDoctor: true,
+  text: "Hello, what symptoms are you experiencing?@@I have a fever and cough.",
+  riskScore: 40,
+  memo: "Respiratory symptoms"
+});
+```
+
+## Error Handling
+
+All API endpoints return appropriate HTTP status codes along with error messages in JSON format in case of failure:
+
+- `400 Bad Request`: Invalid request format
+- `404 Not Found`: Resource not found
+- `500 Internal Server Error`: Server-side error
+
+## Health Check
+
+The API provides a health endpoint to verify the service status:
+
+```
+GET /health
+```
+
+**Example Response** (service healthy):
+```json
+{
+  "status": "ok",
+  "message": "Server is running and connected to the database"
 }
 ```
 
-## 에러 처리
-
-모든 API 엔드포인트는 실패 시 적절한 HTTP 상태 코드와 함께 오류 메시지를 JSON 형식으로 반환합니다:
-
-- `400 Bad Request`: 잘못된 요청 형식
-- `404 Not Found`: 리소스를 찾을 수 없음
-- `500 Internal Server Error`: 서버 내부 오류
-
-## 주의사항
-
-- `text` 필드의 메시지는 `@@` 구분자로 분리됩니다.
-- `startWithDoctor` 값에 따라 메시지 순서가 결정됩니다:
-  - `true`: 홀수 인덱스 메시지는 환자, 짝수 인덱스 메시지는 의사
-  - `false`: 홀수 인덱스 메시지는 의사, 짝수 인덱스 메시지는 환자
-- `riskScore`에 따른 위험도 레이블:
-  - 1-24: "Low Risk"
-  - 25-49: "Medium Risk"
-  - 50-74: "High Risk"
-  - 75-100: "Very High Risk"
+**Example cURL**:
+```bash
+curl -X GET https://hsil-korean-msg-api.onrender.com/health
+```
