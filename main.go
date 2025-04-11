@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -21,26 +20,32 @@ type Chat struct {
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
+var host = "localhost"
+
+// var host = os.Getenv("databaseURL")
+var port = 5432
+var user = os.Getenv("username")
+var password = os.Getenv("password")
+var dbname = "anymodb"
+
 var db *sql.DB
 
 func main() {
-	// Load environment variables only in development
-	if os.Getenv("ENVIRONMENT") != "production" {
-		if err := godotenv.Load(); err != nil {
-			log.Println("No .env file found")
-		}
-	}
+	pgConnStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
 
-	// Database connection
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		log.Fatal("DATABASE_URL environment variable is required")
+	conn, err := sql.Open("postgres", pgConnStr)
+	if err != nil {
+		log.Fatalf("Error opening database connection: %v", err)
 	}
+	db = conn
+	defer db.Close()
 
-	log.Printf("Connecting to database with URL: %s", dbURL)
-	
-	var err error
-	db, err = sql.Open("postgres", dbURL)
+	err = db.Ping()
+	if err != nil {
+		log.Fatalf("Error connecting to the database: %v", err)
+	}
+	fmt.Println("Connected to the PostgreSQL database")
+	db, err = sql.Open("postgres", host)
 	if err != nil {
 		log.Fatalf("Failed to open database connection: %v", err)
 	}
