@@ -31,6 +31,8 @@ type Chat struct {
 
 var db *sql.DB
 var mlAPIURL = "https://anymo-ml.onrender.com"
+var mlAPIMaxRetries = 3
+var mlAPIRetryDelay = 2 * time.Second
 
 func main() {
 	// Load .env file only in development environment (not in production)
@@ -186,22 +188,42 @@ type SuicideRiskResponse struct {
 }
 
 func analyzeSuicideRisk(text string) (int, error) {
+	var err error
+	var resp *http.Response
+	
 	url := fmt.Sprintf("%s/suicide-risk", mlAPIURL)
 	reqBody, err := json.Marshal(SuicideRiskRequest{Text: text})
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal suicide risk request: %v", err)
 	}
-
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return 0, fmt.Errorf("failed to make suicide risk API request: %v", err)
+	
+	// Retry logic for ML API requests
+	for i := 0; i < mlAPIMaxRetries; i++ {
+		resp, err = http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+		if err == nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+		
+		if resp != nil {
+			resp.Body.Close()
+		}
+		
+		log.Printf("ML API suicide risk request failed (attempt %d/%d): %v", i+1, mlAPIMaxRetries, err)
+		if i < mlAPIMaxRetries-1 {
+			time.Sleep(mlAPIRetryDelay)
+		}
 	}
-	defer resp.Body.Close()
-
+	
+	if err != nil {
+		return 0, fmt.Errorf("failed to make suicide risk API request after %d attempts: %v", mlAPIMaxRetries, err)
+	}
+	
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		return 0, fmt.Errorf("suicide risk API returned error, status: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
+	defer resp.Body.Close()
 
 	var riskResponse SuicideRiskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&riskResponse); err != nil {
@@ -221,22 +243,42 @@ type SentimentResponse struct {
 }
 
 func analyzeSentiment(text string) (string, error) {
+	var err error
+	var resp *http.Response
+	
 	url := fmt.Sprintf("%s/sentiment", mlAPIURL)
 	reqBody, err := json.Marshal(SentimentRequest{Text: text})
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal sentiment request: %v", err)
 	}
-
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return "", fmt.Errorf("failed to make sentiment API request: %v", err)
+	
+	// Retry logic for ML API requests
+	for i := 0; i < mlAPIMaxRetries; i++ {
+		resp, err = http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+		if err == nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+		
+		if resp != nil {
+			resp.Body.Close()
+		}
+		
+		log.Printf("ML API sentiment request failed (attempt %d/%d): %v", i+1, mlAPIMaxRetries, err)
+		if i < mlAPIMaxRetries-1 {
+			time.Sleep(mlAPIRetryDelay)
+		}
 	}
-	defer resp.Body.Close()
-
+	
+	if err != nil {
+		return "", fmt.Errorf("failed to make sentiment API request after %d attempts: %v", mlAPIMaxRetries, err)
+	}
+	
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		return "", fmt.Errorf("sentiment API returned error, status: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
+	defer resp.Body.Close()
 
 	var sentimentResponse SentimentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&sentimentResponse); err != nil {
