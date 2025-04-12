@@ -107,6 +107,9 @@ func main() {
 	r.DELETE("/chats/:id", deleteChat)
 	r.POST("/processChat", processChat)
 
+	// New /analyze endpoint for conversation analysis (matching the frontend's expected JSON format)
+	r.POST("/analyze", processChat)
+
 	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
 		err := db.Ping()
