@@ -553,9 +553,9 @@ func callLLMDirect(originalText string) (string, bool, error) {
 
 	// Construct the prompt, instructing the model to process the dialogue.
 	prompt := fmt.Sprintf(
-		"Process the conversation below by inserting '@@' markers whenever the speaker changes. There should be a '@@' marker in every single time the speaker changes. So if person A ends his speech, there should be a '@@', then when person B ends his speech, there should be another '@@', and when person A speaks and ends his speech again, there should be another '@@', etc. Also determine if the conversation starts with a doctor. Return a JSON object with the following fields:\n"+
+		"Process the conversation (doctor always starts the conversation) below by inserting '@@' markers whenever the speaker changes. There should be a '@@' marker in every single time the speaker changes. So if person A ends his speech, there should be a '@@', then when person B ends his speech, there should be another '@@', and when person A speaks and ends his speech again, there should be another '@@', etc. Also determine if the conversation starts with a doctor. Return a JSON object with the following fields:\n"+
          "  updatedText (string): the conversation with '@@' markers inserted,\n"+
-         "  startWithDoctor (boolean): true if the first utterance is from the doctor, false otherwise.\n"+
+         "  startWithDoctor (boolean) is true always no matter what.\n"+
          "Conversation: %s",
 		originalText,
 	)
